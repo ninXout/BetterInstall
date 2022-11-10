@@ -102,7 +102,7 @@ fn uninstall() -> bool {
 		return false;
 	}
 
-	if let Err(e) = std::fs::remove_dir_all(sdk_path) {
+	if let Err(e) = std::fs::remove_dir_all("/Users/Shared/Geode/sdk") {
 		fail!("Unable to uninstall SDK: {}", e);
 		return false;
 	}
@@ -178,8 +178,47 @@ fn install(config: &mut Config, path: PathBuf) {
 	let parent = path.parent().unwrap();
 
 	if std::env::var("GEODE_SDK").is_ok() {
-		fail!("SDK is already installed");
-		info!("Use --reinstall if you want to remove the existing installation");
+		warn!("This will override your old GeodeSDK installation, if you have one.");
+
+		let mut callbacks = RemoteCallbacks::new();
+		callbacks.sideband_progress(|x| {
+			print!(
+				"{} {}",
+				"| Info |".bright_cyan(),
+				std::str::from_utf8(x).unwrap()
+			);
+			true
+		});
+
+		let mut fetch = FetchOptions::new();
+		fetch.remote_callbacks(callbacks);
+
+		let mut builder = RepoBuilder::new();
+		builder.fetch_options(fetch);
+
+		let repo = builder
+			.clone("https://github.com/geode-sdk/geode", &path)
+			.nice_unwrap("Could not download SDK");
+
+		// update submodules, because for some reason
+		// Repository::update_submodules is private
+		update_submodules_recurse(&repo).nice_unwrap("Unable to update submodules!");
+
+		// set GEODE_SDK environment variable;
+		if set_sdk_env(&path) {
+			info!("Set GEODE_SDK environment variable automatically");
+		} else {
+			warn!("Unable to set GEODE_SDK environment variable automatically");
+			info!(
+				"Please set the GEODE_SDK enviroment variable to {}",
+				path.to_str().unwrap()
+			);
+		}
+
+		switch_to_tag(config, &repo);
+
+		done!("Successfully installed SDK");
+		info!("Use `geode sdk install-binaries` to install pre-built binaries");
 	} else if !parent.exists() {
 		fail!("Parent folder {} does not exist", parent.display());
 	} else if path.exists() {
